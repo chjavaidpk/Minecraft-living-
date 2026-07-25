@@ -1,0 +1,98 @@
+name: YouTube Live Stream from Google Drive
+
+on:
+  workflow_dispatch:
+    inputs:
+      gdrive_url:
+        description: 'Google Drive Video or Folder Shareable Link'
+        required: true
+      stream_key:
+        description: 'YouTube Stream Key'
+        required: true
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg curl
+        python -m pip install --upgrade pip
+        pip install --upgrade --no-cache-dir yt-dlp
+
+    - name: Run Live Streaming
+      env:
+        GDRIVE_URL: ${{ github.event.inputs.gdrive_url }}
+        STREAM_KEY: ${{ github.event.inputs.stream_key }}
+      run: |
+        cat << 'EOF' > run_stream.py
+        import subprocess, sys, os, time
+
+        g_url = os.environ.get('GDRIVE_URL', '').strip()
+        s_key = os.environ.get('STREAM_KEY', '').strip()
+
+        # Anti-copyright & HD Filter Configuration
+        filter_v = (
+            "scale=1920:1080:force_original_aspect_ratio=decrease,"
+            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
+            "eq=contrast=1.02:saturation=1.05:brightness=0.01,"
+            "unsharp=3:3:0.5:3:3:0.5,"
+            "drawtext=text='LIVE STREAM 24/7':x=w-text_w-30:y=30:fontsize=28:fontcolor=white@0.3"
+        )
+
+        filter_a = "asetrate=44100*1.01,atempo=1/1.01,aresample=async=1:min_hard_comp=0.100000:first_pts=0"
+
+        print("Starting Continuous Streaming Loop...")
+
+        while True:
+            print("\nFetching stream URL from Google Drive...")
+            cmd = ['yt-dlp', '-g', '--flat-playlist', g_url]
+
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                urls = [u for u in res.stdout.strip().split('\n') if u]
+                print(f"Found {len(urls)} stream URL(s).")
+            except Exception as e:
+                print("Error fetching URLs. Retrying in 10 seconds...")
+                time.sleep(10)
+                continue
+
+            for idx, stream_direct_url in enumerate(urls, 1):
+                print(f"\n▶ Now Streaming Video {idx} of {len(urls)}...")
+
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y',
+                    '-re',
+                    '-i', stream_direct_url,
+                    '-vf', filter_v,
+                    '-af', filter_a,
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-tune', 'zerolatency',
+                    '-b:v', '4500k',
+                    '-maxrate', '5000k',
+                    '-bufsize', '10000k',
+                    '-pix_fmt', 'yuv420p',
+                    '-g', '50',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-ar', '44100',
+                    '-f', 'flv', f'rtmp://a.rtmp.youtube.com/live2/{s_key}'
+                ]
+
+                subprocess.run(ffmpeg_cmd)
+
+        EOF
+
+        python run_stream.py
+        
