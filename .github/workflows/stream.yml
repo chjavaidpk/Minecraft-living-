@@ -57,15 +57,15 @@ jobs:
         print("🔍 Downloading videos from Google Drive folder...")
         os.makedirs("downloads", exist_ok=True)
         
-        # Download folder via gdown (Bypasses Google Drive HTTP 400 Blocks)
-        dl_cmd = ['gdown', '--folder', '--remaining-ok', g_url, '-O', 'downloads']
+        # Download folder via gdown using correct syntax
+        dl_cmd = ['gdown', '--folder', g_url, '-O', 'downloads']
 
         try:
             subprocess.run(dl_cmd, check=True)
         except Exception as e:
-            print("⚠️ Folder download fallback... Trying single file or direct link download.")
+            print("⚠️ Folder download failed... Trying direct download as single file.")
             try:
-                gdown_file_cmd = ['gdown', '--fuzzy', g_url, '-O', 'downloads/']
+                gdown_file_cmd = ['gdown', g_url, '-O', 'downloads/video.mp4']
                 subprocess.run(gdown_file_cmd, check=True)
             except Exception as ex:
                 print("❌ Download failed. Check drive link permissions!")
