@@ -28,7 +28,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg curl
         python -m pip install --upgrade pip
-        pip install --upgrade --no-cache-dir yt-dlp
+        pip install --upgrade --no-cache-dir gdown yt-dlp
 
     - name: Run Direct Live Streaming Process
       env:
@@ -36,7 +36,7 @@ jobs:
         STREAM_KEY: ${{ github.event.inputs.stream_key }}
       run: |
         cat << 'EOF' > run_stream.py
-        import subprocess, sys, os, time
+        import subprocess, sys, os, time, glob
 
         g_url = os.environ.get('GDRIVE_URL', '').strip()
         s_key = os.environ.get('STREAM_KEY', '').strip()
@@ -54,35 +54,47 @@ jobs:
 
         filter_a = "asetrate=44100*1.015,atempo=1/1.015,aresample=async=1:min_hard_comp=0.100000:first_pts=0"
 
-        print("🔍 Extracting video links from Google Drive folder...")
-        cmd = ['yt-dlp', '-g', '--flat-playlist', g_url]
+        print("🔍 Downloading videos from Google Drive folder...")
+        os.makedirs("downloads", exist_ok=True)
+        
+        # Download folder via gdown (Bypasses Google Drive HTTP 400 Blocks)
+        dl_cmd = ['gdown', '--folder', '--remaining-ok', g_url, '-O', 'downloads']
 
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            raw_output = res.stdout.strip()
-            urls = [u for u in raw_output.split('\n') if u.startswith('http')]
-            
-            if not urls:
-                print("❌ No direct video links found. Checking raw output...")
-                urls = [u for u in raw_output.split('\n') if u.strip()]
-
-            print(f"✅ Found {len(urls)} video(s) for streaming.")
+            subprocess.run(dl_cmd, check=True)
         except Exception as e:
-            print("❌ Error fetching Drive links. Ensure Google Drive link sharing is 'Anyone with link'.")
-            if hasattr(e, 'stderr') and e.stderr:
-                print(str(e.stderr))
+            print("⚠️ Folder download fallback... Trying single file or direct link download.")
+            try:
+                gdown_file_cmd = ['gdown', '--fuzzy', g_url, '-O', 'downloads/']
+                subprocess.run(gdown_file_cmd, check=True)
+            except Exception as ex:
+                print("❌ Download failed. Check drive link permissions!")
+                sys.exit(1)
+
+        # Get all downloaded video files
+        video_extensions = ('*.mp4', '*.mkv', '*.mov', '*.avi', '*.webm')
+        video_files = []
+        for ext in video_extensions:
+            video_files.extend(glob.glob(f"downloads/**/{ext}", recursive=True))
+
+        video_files.sort()
+
+        if not video_files:
+            print("❌ No video files found in the downloaded Google Drive folder!")
             sys.exit(1)
 
-        # Stream each video as a separate post
-        for idx, stream_direct_url in enumerate(urls, 1):
+        print(f"✅ Found {len(video_files)} video file(s) for streaming.")
+
+        # Stream each downloaded video
+        for idx, video_path in enumerate(video_files, 1):
             print(f"\n==================================================")
-            print(f"🔴 Streaming Video {idx} of {len(urls)}...")
+            print(f"🔴 Streaming Video {idx} of {len(video_files)}: {os.path.basename(video_path)}")
             print(f"==================================================")
 
             ffmpeg_cmd = [
                 'ffmpeg', '-y',
                 '-re',
-                '-i', stream_direct_url,
+                '-i', video_path,
                 '-vf', filter_v,
                 '-af', filter_a,
                 '-c:v', 'libx264',
@@ -103,8 +115,8 @@ jobs:
 
             print(f"\n⏹ Video {idx} finished. Stream disconnected.")
 
-            if idx < len(urls):
-                print("⏳ Waiting 15 seconds for YouTube to save the post before starting next stream...")
+            if idx < len(video_files):
+                print("⏳ Waiting 15 seconds before starting next video stream...")
                 time.sleep(15)
 
         print("\n🎉 All videos streamed as individual posts successfully!")
