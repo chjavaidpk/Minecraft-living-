@@ -1,10 +1,10 @@
-name: YouTube Live Stream with Dynamic India IP Failover
+name: YouTube Live Stream Auto-Split - Google Drive
 
 on:
   workflow_dispatch:
     inputs:
       gdrive_url:
-        description: 'Google Drive Video or Folder Shareable Link'
+        description: 'Google Drive Folder Shareable Link'
         required: true
       stream_key:
         description: 'YouTube Stream Key'
@@ -23,59 +23,25 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Tools & Dependencies
+    - name: Install Tools
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg curl
         python -m pip install --upgrade pip
-        pip install --upgrade --no-cache-dir yt-dlp requests
+        pip install --upgrade --no-cache-dir yt-dlp
 
-    - name: Run Live Streaming Process with India IP Routing
+    - name: Run Direct Live Streaming Process
       env:
         GDRIVE_URL: ${{ github.event.inputs.gdrive_url }}
         STREAM_KEY: ${{ github.event.inputs.stream_key }}
       run: |
         cat << 'EOF' > run_stream.py
-        import subprocess, sys, os, time, requests
+        import subprocess, sys, os, time
 
         g_url = os.environ.get('GDRIVE_URL', '').strip()
         s_key = os.environ.get('STREAM_KEY', '').strip()
 
-        # 🌐 FUNCTION TO FIND AND VERIFY WORKING UNBLOCKED INDIAN IP
-        def get_working_india_proxy():
-            print("🔍 Searching for working, unblocked India IP proxy...")
-            try:
-                # Fetching public proxy list
-                resp = requests.get("https://raw.githubusercontent.com/themightychris/Fetch-Node-Proxies/main/proxies.json", timeout=5)
-                # Fallback to working India IP testing list
-                test_proxies = [
-                    "http://103.159.204.14:8080",
-                    "http://103.115.15.5:8080",
-                    "http://103.211.218.150:80",
-                    "http://43.205.105.100:80"
-                ]
-            except Exception:
-                test_proxies = []
-
-            for proxy in test_proxies:
-                try:
-                    # Check if IP is responsive and unblocked by YouTube
-                    print(f"⚡ Testing India IP: {proxy}...")
-                    test_req = requests.get("https://www.youtube.com", proxies={"http": proxy, "https": proxy}, timeout=4)
-                    if test_req.status_code == 200:
-                        print(f"✅ Success! Connected to Active India IP: {proxy}")
-                        return proxy
-                except Exception:
-                    print(f"❌ IP Busy or Blocked. Switching to next India IP...")
-                    continue
-            
-            print("⚠️ No proxy responded quickly. Falling back to direct high-speed YouTube node.")
-            return None
-
-        # Get Valid India Proxy
-        active_proxy = get_working_india_proxy()
-
-        # 🚀 ADVANCED ANTI-COPYRIGHT VIDEO FILTER
+        # 🚀 ADVANCED ANTI-COPYRIGHT & WATERMARK FILTER
         filter_v = (
             "scale=1920:1080:force_original_aspect_ratio=decrease,"
             "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
@@ -86,32 +52,30 @@ jobs:
             "drawtext=text='AI SETORI':x=w-text_w-30:y=30:fontsize=28:fontcolor=white@0.3"
         )
 
+        # 🎵 ADVANCED AUDIO ANTI-COPYRIGHT FILTER
         filter_a = "asetrate=44100*1.015,atempo=1/1.015,aresample=async=1:min_hard_comp=0.100000:first_pts=0"
 
-        print("\n🔍 Extracting stream URLs from Google Drive link...")
-        cmd = ['yt-dlp', '-g', '--flat-playlist', g_url]
+        print("🔍 Extracting video links from Google Drive folder...")
+        cmd = ['yt-dlp', '-g', '--flat-playlist', '--no-warnings', g_url]
 
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
             urls = [u for u in res.stdout.strip().split('\n') if u]
             print(f"✅ Found {len(urls)} video(s) for streaming.")
         except Exception as e:
-            print("❌ Error extracting link from Google Drive.")
+            print("❌ Error fetching Drive links. Ensure Google Drive link sharing is 'Anyone with link'.")
+            if hasattr(e, 'stderr'):
+                print(e.stderr)
             sys.exit(1)
 
-        # Stream each video
+        # Stream each video as a separate post
         for idx, stream_direct_url in enumerate(urls, 1):
             print(f"\n==================================================")
-            print(f"🔴 Streaming Video {idx} of {len(urls)} via Selected IP")
+            print(f"🔴 Streaming Video {idx} of {len(urls)}...")
             print(f"==================================================")
 
-            ffmpeg_cmd = ['ffmpeg', '-y']
-            
-            # Route HTTP input through proxy if found
-            if active_proxy:
-                ffmpeg_cmd.extend(['-http_proxy', active_proxy])
-
-            ffmpeg_cmd.extend([
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',
                 '-re',
                 '-i', stream_direct_url,
                 '-vf', filter_v,
@@ -128,17 +92,17 @@ jobs:
                 '-b:a', '128k',
                 '-ar', '44100',
                 '-f', 'flv', f'rtmp://a.rtmp.youtube.com/live2/{s_key}'
-            ])
+            ]
 
             subprocess.run(ffmpeg_cmd)
 
-            print(f"\n⏹ Video {idx} completed. Stream stopped.")
+            print(f"\n⏹ Video {idx} finished. Stream disconnected.")
 
             if idx < len(urls):
-                print("⏳ Waiting 15 seconds before next video stream...")
+                print("⏳ Waiting 15 seconds for YouTube to save the post before starting next stream...")
                 time.sleep(15)
 
-        print("\n🎉 All videos streamed successfully!")
+        print("\n🎉 All videos streamed as individual posts successfully!")
 
         EOF
 
